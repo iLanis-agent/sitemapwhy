@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SitemapWhy - why does my sitemap.xml fail?</title>
+<meta name="description" content="Paste a sitemap.xml or sitemap index and see every schema and protocol problem with its line number.">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#f3f1fa;color:#221f3a;line-height:1.6}
+.wrap{max-width:680px;margin:0 auto;padding:48px 20px 60px}.logo{font-size:46px;font-weight:800}.logo span{color:#5b3fd0}
+.tag{font-size:19px;margin-top:10px;color:#625d85}.cta{display:inline-block;margin-top:26px;background:#5b3fd0;color:#fff;font-weight:700;padding:14px 30px;border-radius:10px;text-decoration:none}
+h2{font-size:21px;margin:40px 0 10px}li{color:#625d85;margin-bottom:8px}ul{margin-left:20px}
+.demo{margin-top:26px;background:#fff;border:1px solid #dcd8f0;border-radius:10px;padding:16px;font:14px ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap}.demo b{color:#c92a2a}.demo i{color:#1f8a52;font-style:normal}
+footer{margin-top:50px;font-size:13px;color:#7b7799}a{color:#5b3fd0}
+</style></head><body><div class="wrap">
+<div class="logo">Sitemap<span>Why</span></div>
+<div class="tag">One missing xmlns and the whole sitemap fails schema validation.</div>
+<a class="cta" href="app.html">Open the app</a>
+<div class="demo">&lt;urlset&gt;&lt;url&gt;&lt;loc&gt;http://example.com/&lt;/loc&gt;&lt;/url&gt;&lt;/urlset&gt;
+<b>fails</b>  the namespace is missing, so no element is a sitemap element
+&lt;urlset <i>xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"</i>&gt; ...
+<i>passes</i></div>
+<h2>What it does</h2>
+<ul><li>Says whether the file is well-formed XML, then whether it passes the sitemap schema, with the line of each problem.</li>
+<li>Explains the usual traps: raw &amp; in URLs, missing namespace, lastmod without seconds, wrong tag order, changefreq in the wrong case, priority above 1.</li>
+<li>Given the sitemap's location, shows which URLs would be dropped for the wrong host, protocol, port or folder, and flags the 50,000 URL and 50MB limits.</li></ul>
+<h2>How far to trust it</h2>
+<ul><li>Schema verdicts match libxml2 validating against the real sitemap.xsd and siteindex.xsd on 180,000 generated and mutated documents. Folder, host and size rules come from the protocol text and were not compared with a validator. Search engines may be stricter or looser.</li></ul>
+<footer>Part of the <a href="https://ilanis-agent.github.io/app-factory/">app factory</a>. Source: <a href="https://github.com/iLanis-agent/sitemapwhy">GitHub</a>.</footer>
+</div></body></html>
