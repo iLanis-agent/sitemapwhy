@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SitemapWhy app - why does my sitemap.xml fail?</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#f3f1fa;color:#221f3a;line-height:1.5}
+.wrap{max-width:900px;margin:0 auto;padding:26px 16px 50px}
+h1{font-size:30px}h1 span{color:#5b3fd0}.sub{color:#625d85;margin:6px 0 14px}
+label{display:block;font-size:13px;color:#625d85;margin:10px 0 4px}
+textarea,input[type=text]{width:100%;background:#fff;color:#221f3a;border:1px solid #cfcae8;border-radius:8px;padding:9px 10px;font:13px ui-monospace,Menlo,Consolas,monospace}
+textarea{height:210px;resize:vertical;white-space:pre}
+.pre button{background:#fff;color:#5b3fd0;border:1px solid #5b3fd0;border-radius:20px;padding:5px 12px;margin:0 6px 8px 0;cursor:pointer;font-size:13px}
+.card{background:#fff;border:1px solid #dcd8f0;border-radius:10px;padding:12px 16px;margin-top:12px}
+.verdict{font-size:18px;font-weight:700}.v-valid{color:#1f8a52}.v-invalid,.v-malformed{color:#c92a2a}
+.stats{color:#625d85;font-size:14px;margin-top:4px}
+.n{margin-top:8px;padding:7px 10px;border-left:4px solid;font-size:14px;border-radius:0 6px 6px 0}.fatal,.error{border-color:#c92a2a;background:#ffe9e9}.warn{border-color:#d9780f;background:#fff1e0}.good{border-color:#1f8a52;background:#e3f5ea}
+.ln{display:inline-block;min-width:58px;font:12px ui-monospace,Menlo,Consolas,monospace;color:#625d85}
+code{font:13px ui-monospace,Menlo,Consolas,monospace;background:#ebe8f8;padding:1px 5px;border-radius:4px}
+.foot{color:#7b7799;font-size:13px;margin-top:18px}a{color:#5b3fd0}
+</style></head><body><div class="wrap">
+<h1>Sitemap<span>Why</span></h1>
+<div class="sub">Paste a <code>sitemap.xml</code> or sitemap index. It is checked against the sitemaps.org 0.9 schema rules and the protocol's own limits, and every problem is explained with its line number.</div>
+<div class="pre" id="pre"></div>
+<label for="xml">Sitemap XML</label><textarea id="xml" spellcheck="false"></textarea>
+<label for="loc">Where the file will live (optional, enables the same-host and folder rules)</label><input type="text" id="loc" spellcheck="false">
+<div id="out"></div>
+<div class="foot">Rules come from the sitemaps.org protocol page (read in full) and its two schema files, sitemap.xsd and siteindex.xsd. The checker was compared with libxml2 validating against those real schema files on 180,000 generated and mutated documents with no disagreement on whether a file is well-formed XML and whether it passes the schema. The same-host, folder, 50,000-URL and 50MB checks come from the protocol text and were not compared with a validator. Search engines may be stricter or looser than the schema. Runs in your browser; nothing is uploaded. Unlike a full XML parser it does not support DOCTYPE declarations or non-UTF-8 text.</div>
+<div class="foot">Part of the <a href="https://ilanis-agent.github.io/app-factory/">app factory</a>. Source: <a href="https://github.com/iLanis-agent/sitemapwhy">GitHub</a>.</div>
+</div>
+<script>
+/* SitemapWhy engine: XML subset parser + sitemaps.org 0.9 schema rules (sitemap.xsd, siteindex.xsd) + protocol-text checks. */
+(function (root) {
+  'use strict';
+  var NS = 'http://www.sitemaps.org/schemas/sitemap/0.9';
+  var XSI = 'http://www.w3.org/2001/XMLSchema-instance';
+  var NAME = /^[A-Za-z_:\u00C0-\uFFFD][-A-Za-z0-9_.:\u00B7\u00C0-\uFFFD]*$/;
+  var LIMITS = { urls: 50000, bytes: 52428800, loc: 2048 };
+
+  var lc = { s: null, p: 0, n: 1 };
+  function lineOf(s, i) { if (lc.s !== s || i < lc.p) { lc.s = s; lc.p = 0; lc.n = 1; } var k = lc.p, n = lc.n, e = Math.min(i, s.length); for (; k < e; k++) if (s.charCodeAt(k) === 10) n++; lc.p = k; lc.n = n; return n; }
+  function badChar(c) { return (c < 0x20 && c !== 9 && c !== 10 && c !== 13) || c === 0xFFFE || c === 0xFFFF; }
+
+  function decodeText(s, at, src, errs) {
+    var out = '', i = 0;
+    while (i < s.length) {
+      var c = s[i];
+      if (c !== '&') { out += c; i++; continue; }
+      var j = s.indexOf(';', i);
+      if (j < 0) return { err: 'A "&" must be written as &amp; (no ";" found after it)', pos: at + i };
+      var ent = s.slice(i + 1, j);
+      if (ent === 'amp') out += '&'; else if (ent === 'lt') out += '<'; else if (ent === 'gt') out += '>'; else if (ent === 'quot') out += '"'; else if (ent === 'apos') out += "'";
+      else if (/^#[0-9]+$/.test(ent) || /^#x[0-9A-Fa-f]+$/.test(ent)) {
+        var cp = ent[1] === 'x' ? parseInt(ent.slice(2), 16) : parseInt(ent.slice(1), 10);
+        if (!(cp > 0 && cp <= 0x10FFFF) || badChar(cp) || (cp >= 0xD800 && cp <= 0xDFFF)) return { err: 'Character reference &' + ent + '; is not a legal XML character', pos: at + i };
+        out += String.fromCodePoint(cp);
+      } else if (/^[A-Za-z_][-A-Za-z0-9_.]*$/.test(ent)) return { err: 'Unknown entity &' + ent + '; (XML only defines amp, lt, gt, quot, apos). Write a literal & as &amp;', pos: at + i };
+      else return { err: 'A "&" must be written as &amp; (found "&' + ent.slice(0, 12) + '")', pos: at + i };
+      i = j + 1;
+    }
+    return { text: out };
+  }
+
+  function parseXml(src) {
+    var i = 0, n = src.length, stack = [], rootEl = null, started = false;
+    function fail(msg, pos) { return { ok: false, error: { line: lineOf(src, pos === undefined ? i : pos), msg: msg } }; }
+    if (src.charCodeAt(0) === 0xFEFF) { i = 1; }
+    for (var k = 0; k < n; k++) { var cc = src.charCodeAt(k); if (badChar(cc)) return fail('Illegal character U+' + cc.toString(16).toUpperCase().padStart(4, '0') + ' (control characters are not allowed in XML)', k); }
+    if (src.substr(i, 5) === '<?xml' && /[ \t\r\n]/.test(src[i + 5] || '')) {
+      var e = src.indexOf('?>', i);
+      if (e < 0) return fail('The XML declaration is never closed with ?>', i);
+      var decl = src.slice(i, e + 2);
+      if (!/^<\?xml[ \t\r\n]+version[ \t\r\n]*=[ \t\r\n]*("1\.[0-9]*"|'1\.[0-9]*')([ \t\r\n]+encoding[ \t\r\n]*=[ \t\r\n]*("[A-Za-z][A-Za-z0-9._-]*"|'[A-Za-z][A-Za-z0-9._-]*'))?([ \t\r\n]+standalone[ \t\r\n]*=[ \t\r\n]*("(yes|no)"|'(yes|no)'))?[ \t\r\n]*\?>$/.test(decl)) return fail('The XML declaration is malformed. Expected: <?xml version="1.0" encoding="UTF-8"?>', i);
+      var m = /encoding[ \t\r\n]*=[ \t\r\n]*["']([^"']*)["']/.exec(decl);
+      var enc = m ? m[1] : null;
+      if (enc && !/^(utf-?8|utf-?16|us-ascii|ascii|iso-8859-([1-9]|1[0-5])|windows-125[0-8]|latin1|shift_jis|euc-jp|gb2312|gbk|big5|koi8-r)$/i.test(enc)) return fail('Unsupported encoding name "' + enc + '" in the XML declaration. Sitemaps must be UTF-8.', i);
+      i = e + 2;
+      var res = { encoding: enc };
+      var rest = nextTop(); if (rest && rest.ok === false) return rest;
+      return rest;
+    }
+    return nextTop();
+    function nextTop() {
+      var decl2 = null;
+      while (i < n) {
+        if (src[i] === '<') {
+          if (src.substr(i, 4) === '<!--') { var ce = src.indexOf('-->', i + 4); if (ce < 0) return fail('Comment is never closed', i); if (src.slice(i + 4, ce).indexOf('--') >= 0) return fail('"--" is not allowed inside an XML comment', i); i = ce + 3; continue; }
+          if (src.substr(i, 9) === '<![CDATA[') { if (!stack.length) return fail('CDATA outside the root element', i); var de = src.indexOf(']]>', i); if (de < 0) return fail('CDATA section is never closed', i); stack[stack.length - 1].text += src.slice(i + 9, de); stack[stack.length - 1].hasText = true; i = de + 3; continue; }
+          if (src.substr(i, 2) === '<?') { if (/^<\?xml[ \t\r\n?]/i.test(src.substr(i, 6))) return fail('The XML declaration is only allowed at the very start of the file (no space or text before it)', i); var pe = src.indexOf('?>', i); if (pe < 0) return fail('Processing instruction is never closed', i); if (!NAME.test(/^<\?([^ \t\r\n?]*)/.exec(src.slice(i, pe + 2))[1])) return fail('Malformed processing instruction or XML declaration', i); i = pe + 2; continue; }
+          if (src.substr(i, 2) === '<!') return fail('DOCTYPE and other declarations are not supported here (sitemaps do not use them)', i);
+          if (src[i + 1] === '/') {
+            var ge = src.indexOf('>', i); if (ge < 0) return fail('Closing tag is never finished', i);
+            var cname = src.slice(i + 2, ge).replace(/[ \t\r\n]+$/, '');
+            if (!stack.length) return fail('Closing tag </' + cname + '> with nothing open', i);
+            var top = stack[stack.length - 1];
+            if (top.qname !== cname) return fail('Closing tag </' + cname + '> does not match the open <' + top.qname + '>', i);
+            stack.pop(); i = ge + 1;
+            if (!stack.length) { while (i < n) { if (/[ \t\r\n]/.test(src[i])) { i++; continue; } if (src.substr(i, 4) === '<!--') { var c3 = src.indexOf('-->', i + 4); if (c3 < 0) return fail('Comment is never closed', i); i = c3 + 3; continue; } if (src.substr(i, 2) === '<?') { var p3 = src.indexOf('?>', i); if (p3 < 0) return fail('Processing instruction is never closed', i); i = p3 + 2; continue; } return fail('Extra content after the end of the root element', i); } }
+            continue;
+          }
+          if (!stack.length && rootEl) return fail('Extra content after the end of the root element', i);
+          var t = parseStartTag(); if (t.ok === false) return t;
+          continue;
+        }
+        var j = src.indexOf('<', i); if (j < 0) j = n;
+        var raw = src.slice(i, j);
+        if (!stack.length) { if (/[^ \t\r\n]/.test(raw)) return fail(rootEl ? 'Extra content after the end of the root element' : 'Text before the root element (the file must start with <?xml or <urlset)', i); i = j; continue; }
+        if (raw.indexOf(']]>') >= 0) return fail('"]]>" is not allowed in text', i);
+        var d = decodeText(raw, i, src); if (d.err) return fail(d.err, d.pos);
+        stack[stack.length - 1].text += d.text; if (/\S/.test(d.text)) stack[stack.length - 1].hasText = true;
+        i = j;
+      }
+      if (stack.length) return fail('The file ends while <' + stack[stack.length - 1].qname + '> is still open', n);
+      if (!rootEl) return fail('No root element found', 0);
+      resolveNs(rootEl, { xml: 'http://www.w3.org/XML/1998/namespace' });
+      if (rootEl.nsErr) return fail(rootEl.nsErr.msg, rootEl.nsErr.pos);
+      return { ok: true, root: rootEl, encoding: enc };
+    }
+    function parseStartTag() {
+      var at = i, m = /^<([^ \t\r\n\/>=<"']+)/.exec(src.slice(i, i + 300));
+      if (!m || !NAME.test(m[1])) return fail('Malformed tag name', i);
+      var qname = m[1]; i += m[0].length;
+      var attrs = [], seen = {};
+      for (;;) {
+        var ws = /^[ \t\r\n]*/.exec(src.slice(i, i + 5000))[0]; i += ws.length;
+        if (i >= n) return fail('Tag <' + qname + '> is never finished', at);
+        if (src[i] === '>' || src.substr(i, 2) === '/>') break;
+        if (!ws.length) return fail('Attributes must be separated by spaces', i);
+        var am = /^([^ \t\r\n=<>"'\/]+)[ \t\r\n]*=[ \t\r\n]*("([^"<]*)"|'([^'<]*)')/.exec(src.slice(i, i + 5000));
+        if (!am || !NAME.test(am[1])) return fail('Malformed attribute in <' + qname + '> (values need quotes and may not contain "<")', i);
+        if (seen[am[1]]) return fail('Attribute "' + am[1] + '" appears twice in <' + qname + '>', i);
+        seen[am[1]] = 1;
+        var val = am[3] !== undefined ? am[3] : am[4];
+        var dv = decodeText(val, i, src); if (dv.err) return fail(dv.err, dv.pos);
+        attrs.push({ qname: am[1], value: dv.text.replace(/[\t\n\r]/g, ' ') });
+        i += am[0].length;
+      }
+      var self = src[i] === '/'; i += self ? 2 : 1;
+      var el = { qname: qname, attrs: attrs, children: [], text: '', hasText: false, line: lineOf(src, at), pos: at };
+      if (stack.length) stack[stack.length - 1].children.push(el); else { if (rootEl) return fail('Extra content after the end of the root element', at); rootEl = el; }
+      if (!self) stack.push(el);
+      else if (!stack.length) { while (i < n) { if (/[ \t\r\n]/.test(src[i])) { i++; continue; } if (src.substr(i, 4) === '<!--') { var c4 = src.indexOf('-->', i + 4); if (c4 < 0) return fail('Comment is never closed', i); i = c4 + 3; continue; } return fail('Extra content after the end of the root element', i); } }
+      return { ok: true };
+    }
+    function resolveNs(el, scope) {
+      var sc = Object.assign({}, scope);
+      el.attrs.forEach(function (a) { if (a.qname === 'xmlns' || a.qname.indexOf('xmlns:') === 0) { if ((/[\s<>"{}|\\^`]/.test(a.value) || /^[^:\/?#]*[^A-Za-z0-9+.:\/?#-][^:\/?#]*:/.test(a.value)) && !rootEl.nsErr) rootEl.nsErr = { msg: 'The namespace "' + a.value + '" is not a valid URI', pos: el.pos }; }
+      if (a.qname === 'xmlns') sc[''] = a.value; else if (a.qname.indexOf('xmlns:') === 0) sc[a.qname.slice(6)] = a.value; });
+      var p = el.qname.indexOf(':');
+      var pre = p < 0 ? '' : el.qname.slice(0, p);
+      el.local = p < 0 ? el.qname : el.qname.slice(p + 1);
+      if (pre && sc[pre] === undefined) { if (!rootEl.nsErr) rootEl.nsErr = { msg: 'Namespace prefix "' + pre + '" is not declared', pos: el.pos }; el.ns = ''; }
+      else el.ns = sc[pre] || '';
+      el.nattrs = [];
+      el.attrs.forEach(function (a) {
+        if (a.qname === 'xmlns' || a.qname.indexOf('xmlns:') === 0) return;
+        var q = a.qname.indexOf(':');
+        if (q < 0) { el.nattrs.push({ ns: '', local: a.qname, value: a.value }); return; }
+        var ap = a.qname.slice(0, q);
+        if (sc[ap] === undefined) { if (!rootEl.nsErr) rootEl.nsErr = { msg: 'Namespace prefix "' + ap + '" is not declared', pos: el.pos }; return; }
+        el.nattrs.push({ ns: sc[ap], local: a.qname.slice(q + 1), value: a.value });
+      });
+      el.children.forEach(function (c) { resolveNs(c, sc); });
+    }
+  }
+
+  /* ---- simple types (collapse whitespace first, as the schema does) ---- */
+  function collapse(s) { return s.replace(/[\t\n\r ]+/g, ' ').replace(/^ | $/g, ''); }
+  function daysIn(y, m) { if (m === 2) return (y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0)) ? 29 : 28; return [4, 6, 9, 11].indexOf(m) >= 0 ? 30 : 31; }
+  function tzOk(tz) { if (!tz || tz === 'Z') return true; var m = /^[+-](\d\d):(\d\d)$/.exec(tz); if (!m) return false; var h = +m[1], mi = +m[2]; return mi < 60 && (h < 14 || (h === 14 && mi === 0)); }
+  function datetimeProblem(raw) {
+    var s = collapse(raw);
+    var m = /^(-?)(\d{4,})-(\d\d)-(\d\d)(?:T(\d\d):(\d\d):(\d\d)(\.\d+)?)?(Z|[+-]\d\d:\d\d)?$/.exec(s);
+    if (!m) return 'is not a W3C date: use YYYY-MM-DD or YYYY-MM-DDThh:mm:ss+hh:mm (seconds are required when a time is given)';
+    var ys = m[2]; if (ys.length > 4 && ys[0] === '0') return 'has a year with leading zeros';
+    var y = +ys * (m[1] ? -1 : 1), mo = +m[3], d = +m[4];
+    if (+ys === 0) return 'has year 0000, which XML Schema does not allow';
+    if (mo < 1 || mo > 12) return 'has month ' + m[3] + ', which does not exist';
+    if (d < 1 || d > daysIn(y, mo)) return 'has day ' + m[4] + ', which does not exist in that month';
+    if (m[5] !== undefined) {
+      var h = +m[5], mi = +m[6], se = +m[7];
+      if (mi > 59 || se > 59) return 'has minutes or seconds above 59';
+      if (h > 24 || (h === 24 && (mi || se || (m[8] && +m[8].slice(1) !== 0)))) return 'has an hour above 23 (only 24:00:00 is allowed as the end of a day)';
+    }
+    if (!tzOk(m[9])) return 'has a time zone offset out of range (max +-14:00)';
+    return null;
+  }
+  function priorityProblem(raw) {
+    var s = collapse(raw);
+    if (!/^[+-]?(\d+(\.\d*)?|\.\d+)$/.test(s)) return 'is not a plain decimal number such as 0.8 (no exponent, no text)';
+    var v = parseFloat(s); if (/^[+-]?0*\.?0*$/.test(s)) v = 0;
+    if (!(v >= 0 && v <= 1)) return 'is ' + s + ', outside the allowed range 0.0 to 1.0';
+    return null;
+  }
+  function uriProblem(raw) {
+    var s = collapse(raw);
+    if (s.length < 12) return 'is only ' + s.length + ' characters; the schema requires at least 12 (a full URL such as http://a.co/)';
+    if (s.length > LIMITS.loc) return 'is ' + s.length + ' characters; the limit is 2,048';
+    if (/%(?![0-9A-Fa-f]{2})/.test(s)) return 'contains a "%" that is not followed by two hex digits (a literal % must be written %25)';
+    var hash = s.indexOf('#'); var noFrag = hash < 0 ? s : s.slice(0, hash);
+    if (hash >= 0 && s.indexOf('#', hash + 1) >= 0) return 'contains more than one "#"';
+    var sm = /^([^:\/?#]*):/.exec(noFrag);
+    if (sm && !/^[A-Za-z][A-Za-z0-9+.\-]*$/.test(sm[1])) return 'has a scheme "' + sm[1] + '" with illegal characters';
+    var hm = /^[A-Za-z][A-Za-z0-9+.\-]*:\/\/([^\/?#]*)/.exec(noFrag);
+    if (hm) { var auth = hm[1].replace(/^[^@]*@/, ''); var br = /^\[[^\]]*\]/.exec(auth); var after = br ? auth.slice(br[0].length) : auth; var pm = /:(.*)$/.exec(after); if (pm && !/^\d*$/.test(pm[1])) return 'has a port that is not a number'; if (!br && /[\[\]]/.test(auth)) return 'has square brackets outside an IPv6 host'; if (br && !/^\[[0-9A-Fa-f:.]+\]$/.test(br[0]) && !/^\[v/i.test(br[0])) return 'has a malformed IPv6 host'; }
+    var rest = hm ? noFrag.slice(noFrag.indexOf(hm[0]) + hm[0].length) : noFrag;
+    if (/[\[\]]/.test(rest)) return 'contains square brackets (write them as %5B and %5D)';
+    return null;
+  }
+
+  /* ---- schema walk ---- */
+  var URL_KIDS = ['loc', 'lastmod', 'changefreq', 'priority'];
+  var FREQ = ['always', 'hourly', 'daily', 'weekly', 'monthly', 'yearly', 'never'];
+  function validateTree(rootEl) {
+    var errs = [];
+    function E(el, lvl, tag, msg) { errs.push({ lvl: lvl, tag: tag, line: el ? el.line : 0, msg: msg }); }
+    var kind = null;
+    if (rootEl.local === 'urlset' || rootEl.local === 'sitemapindex') {
+      if (rootEl.ns !== NS) {
+        E(rootEl, 'fatal', rootEl.local, rootEl.ns === '' ? 'The namespace is missing. The root tag needs xmlns="' + NS + '". Without it every element is in no namespace and the whole file fails schema validation.' : 'Wrong namespace "' + rootEl.ns + '". It must be exactly ' + NS + ' (note: http, not https, and 0.9).');
+        return { errs: errs, kind: rootEl.local, count: rootEl.children.length };
+      }
+      kind = rootEl.local;
+    } else { E(rootEl, 'fatal', rootEl.local, 'The root element must be <urlset> (a sitemap) or <sitemapindex> (an index of sitemaps), not <' + rootEl.qname + '>.'); return { errs: errs, kind: null, count: 0 }; }
+    var childName = kind === 'urlset' ? 'url' : 'sitemap';
+    function attrsCheck(el) { el.nattrs.forEach(function (a) { if (a.ns === XSI && (a.local === 'schemaLocation' || a.local === 'noNamespaceSchemaLocation' || a.local === 'type' || a.local === 'nil')) return; E(el, 'error', el.local, 'Attribute "' + a.local + '" is not allowed here.'); }); }
+    attrsCheck(rootEl);
+    if (rootEl.hasText) E(rootEl, 'error', rootEl.local, 'Text directly inside <' + rootEl.local + '> is not allowed; only <' + childName + '> elements.');
+    var count = 0;
+    rootEl.children.forEach(function (c) {
+      if (c.ns !== NS) { E(c, 'error', c.qname, 'Unexpected element <' + c.qname + '> from namespace "' + (c.ns || 'none') + '". Schema validation rejects elements it has no schema for.'); return; }
+      if (c.local !== childName) { E(c, 'error', c.local, 'Unexpected <' + c.local + '> inside <' + kind + '>. Only <' + childName + '> is allowed here.'); return; }
+      count++;
+      attrsCheck(c);
+      if (c.hasText) E(c, 'error', c.local, 'Text directly inside <' + childName + '> is not allowed; put it in a child tag.');
+      var order = -1, seen = {}, kids = kind === 'urlset' ? URL_KIDS : ['loc', 'lastmod'];
+      c.children.forEach(function (g) {
+        var idx = g.ns === NS ? kids.indexOf(g.local) : -1;
+        if (idx < 0) { E(g, 'error', g.qname, 'Unexpected <' + g.qname + '> inside <' + childName + '>. Allowed: ' + kids.join(', ') + '.'); return; }
+        if (seen[g.local]) E(g, 'error', g.local, '<' + g.local + '> appears more than once in one <' + childName + '>.');
+        else if (idx < order) E(g, 'error', g.local, '<' + g.local + '> is out of order. The schema requires: ' + kids.join(', ') + '.');
+        seen[g.local] = 1; if (idx > order) order = idx;
+        attrsCheck(g);
+        if (g.children.length) { E(g, 'error', g.local, '<' + g.local + '> must contain only text, not child tags.'); return; }
+        var p = null;
+        if (g.local === 'loc') p = uriProblem(g.text);
+        else if (g.local === 'lastmod') p = datetimeProblem(g.text);
+        else if (g.local === 'changefreq') p = FREQ.indexOf(g.text) >= 0 ? null : 'is not an allowed value. Use exactly one of (lower case, no spaces): ' + FREQ.join(', ');
+        else if (g.local === 'priority') p = priorityProblem(g.text);
+        if (p) E(g, 'error', g.local, '"' + g.text.slice(0, 80) + '" ' + p + '.');
+      });
+      if (!seen.loc) E(c, 'error', c.local, '<' + childName + '> has no <loc>, which is required.');
+    });
+    if (count === 0) E(rootEl, 'error', rootEl.local, '<' + kind + '> must contain at least one <' + childName + '>.');
+    return { errs: errs, kind: kind, count: count };
+  }
+
+  /* ---- protocol rules that are not in the schema ---- */
+  function hostPath(u) { var m = /^([A-Za-z][A-Za-z0-9+.\-]*):\/\/([^\/?#]*)([^?#]*)/.exec(collapse(u)); if (!m) return null; var auth = m[2].replace(/^[^@]*@/, '').toLowerCase(); var sch = m[1].toLowerCase(); var port = ''; var pm = /^(.*?):(\d*)$/.exec(auth); if (pm && auth.indexOf(']') < auth.indexOf(':')) { auth = pm[1]; port = pm[2]; } else if (pm && auth[0] !== '[') { auth = pm[1]; port = pm[2]; } if ((sch === 'http' && port === '80') || (sch === 'https' && port === '443')) port = ''; return { scheme: sch, host: auth, port: port, path: m[3] || '/' }; }
+  function scopeChecks(rootEl, kind, locUrl, bytes) {
+    var out = [];
+    if (bytes > LIMITS.bytes) out.push({ lvl: 'error', tag: 'size', line: 0, msg: 'The file is ' + bytes + ' bytes; the limit is 52,428,800 (50MB) uncompressed.' });
+    var cn = kind === 'urlset' ? 'url' : 'sitemap';
+    var kids = rootEl.children.filter(function (c) { return c.ns === NS && c.local === cn; });
+    if (kids.length > LIMITS.urls) out.push({ lvl: 'error', tag: cn, line: 0, msg: 'There are ' + kids.length + ' <' + cn + '> entries; the limit is 50,000 per file. Split into several files and list them in a sitemap index.' });
+    var base = locUrl && locUrl.trim() ? hostPath(locUrl) : null;
+    if (locUrl && locUrl.trim() && !base) { out.push({ lvl: 'warn', tag: 'location', line: 0, msg: 'The sitemap location is not a full URL, so same-host and path checks were skipped.' }); return out; }
+    if (!base) return out;
+    var dir = base.path.replace(/[^\/]*$/, '');
+    var dropped = 0, ex = [];
+    kids.forEach(function (k) {
+      var loc = k.children.filter(function (g) { return g.ns === NS && g.local === 'loc'; })[0]; if (!loc) return;
+      var h = hostPath(loc.text); if (!h) return;
+      var why = null;
+      if (h.scheme !== base.scheme) why = 'uses ' + h.scheme + ' but the sitemap is on ' + base.scheme;
+      else if (h.host !== base.host) why = 'is on host ' + h.host + ', not ' + base.host;
+      else if (h.port !== base.port) why = 'uses port ' + (h.port || 'default') + ', the sitemap uses ' + (base.port || 'default');
+      else if (kind === 'urlset' && h.path.indexOf(dir) !== 0) why = 'is outside the folder ' + dir + ' that this sitemap may cover';
+      if (why) { dropped++; if (ex.length < 6) ex.push({ lvl: 'warn', tag: 'loc', line: loc.line, msg: collapse(loc.text).slice(0, 100) + ' ' + why + '. Search engines drop it.' }); }
+    });
+    if (dropped) out.push({ lvl: 'warn', tag: 'scope', line: 0, msg: dropped + ' of ' + kids.length + ' URLs would be dropped for being outside what this sitemap location may list.' });
+    return out.concat(ex);
+  }
+
+  function check(text, locUrl) {
+    var src = String(text);
+    if (!src.trim()) return { status: 'empty', issues: [] };
+    var bytes = typeof TextEncoder !== 'undefined' ? new TextEncoder().encode(src).length : Buffer.byteLength(src);
+    var p = parseXml(src);
+    if (!p.ok) return { status: 'malformed', schemaValid: false, issues: [{ lvl: 'fatal', tag: 'xml', line: p.error.line, msg: p.error.msg }], bytes: bytes };
+    var v = validateTree(p.root);
+    var issues = v.errs.slice();
+    if (p.encoding && !/^utf-?8$/i.test(p.encoding)) issues.push({ lvl: 'error', tag: 'encoding', line: 1, msg: 'The declaration says encoding "' + p.encoding + '". Sitemaps must be UTF-8.' });
+    var schemaValid = v.errs.length === 0;
+    if (v.kind) issues = issues.concat(scopeChecks(p.root, v.kind, locUrl, bytes));
+    issues.forEach(function (x) { if (x.tag === 'loc' && x.lvl === 'error') return; });
+    var warnLocs = 0;
+    if (v.kind && schemaValid) p.root.children.forEach(function (c) { c.children.forEach(function (g) { if (g.local === 'loc' && /[^\x21-\x7E]/.test(collapse(g.text))) { if (warnLocs++ < 3) issues.push({ lvl: 'warn', tag: 'loc', line: g.line, msg: collapse(g.text).slice(0, 80) + ' contains spaces or non-ASCII characters. The schema accepts it, but the protocol asks for URL-escaped URLs (for example %20 or %C3%BC).' }); } }); });
+    return { status: schemaValid ? 'valid' : 'invalid', schemaValid: schemaValid, kind: v.kind, count: v.count, issues: issues, bytes: bytes };
+  }
+
+  var api = { check: check, parseXml: parseXml, validateTree: validateTree, collapse: collapse, LIMITS: LIMITS, NS: NS };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.SitemapWhy = api;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<script>
+(function () {
+  var S = SitemapWhy, $ = function (id) { return document.getElementById(id); };
+  var H = '<?xml version="1.0" encoding="UTF-8"?>\n', NSA = ' xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"';
+  var PRESETS = [
+    { n: 'protocol example', loc: 'http://www.example.com/sitemap.xml', xml: H + '<urlset' + NSA + '>\n  <url>\n    <loc>http://www.example.com/</loc>\n    <lastmod>2005-01-01</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.8</priority>\n  </url>\n  <url>\n    <loc>http://www.example.com/catalog?item=12&amp;desc=vacation_hawaii</loc>\n    <changefreq>weekly</changefreq>\n  </url>\n</urlset>\n' },
+    { n: 'namespace missing', loc: '', xml: H + '<urlset>\n  <url><loc>http://www.example.com/</loc></url>\n</urlset>\n' },
+    { n: 'raw ampersand', loc: '', xml: H + '<urlset' + NSA + '>\n  <url>\n    <loc>http://www.example.com/catalog?item=12&desc=vacation_hawaii</loc>\n  </url>\n</urlset>\n' },
+    { n: 'bad tag values', loc: '', xml: H + '<urlset' + NSA + '>\n  <url>\n    <loc>http://www.example.com/a</loc>\n    <lastmod>01/02/2024</lastmod>\n    <changefreq>Daily</changefreq>\n    <priority>10</priority>\n  </url>\n  <url>\n    <loc>http://www.example.com/b</loc>\n    <lastmod>2023-02-29</lastmod>\n    <priority>0.8</priority>\n    <changefreq>weekly</changefreq>\n  </url>\n</urlset>\n' },
+    { n: 'wrong host and folder', loc: 'http://example.com/catalog/sitemap.xml', xml: H + '<urlset' + NSA + '>\n  <url><loc>http://example.com/catalog/show?item=23</loc></url>\n  <url><loc>http://example.com/image/show?item=23</loc></url>\n  <url><loc>https://example.com/catalog/page1.php</loc></url>\n  <url><loc>http://www.example.com/catalog/x</loc></url>\n</urlset>\n' },
+    { n: 'sitemap index', loc: 'http://www.example.com/sitemap_index.xml', xml: H + '<sitemapindex' + NSA + '>\n  <sitemap>\n    <loc>http://www.example.com/sitemap1.xml.gz</loc>\n    <lastmod>2004-10-01T18:23:17+00:00</lastmod>\n  </sitemap>\n  <sitemap>\n    <loc>http://www.example.com/sitemap2.xml.gz</loc>\n    <lastmod>2005-01-01</lastmod>\n  </sitemap>\n</sitemapindex>\n' },
+    { n: 'lastmod with time', loc: '', xml: H + '<urlset' + NSA + '>\n  <url>\n    <loc>http://www.example.com/</loc>\n    <lastmod>2024-05-10T17:33</lastmod>\n  </url>\n</urlset>\n' },
+    { n: 'spaces and umlauts', loc: '', xml: H + '<urlset' + NSA + '>\n  <url><loc>http://www.example.com/my page</loc></url>\n  <url><loc>http://www.example.com/ümlat.php</loc></url>\n</urlset>\n' }
+  ];
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function run() {
+    var r = S.check($('xml').value, $('loc').value);
+    if (r.status === 'empty') { $('out').innerHTML = '<div class="card">Paste a sitemap or pick an example.</div>'; return; }
+    var label = { valid: 'Passes the sitemap schema', invalid: 'Fails the sitemap schema', malformed: 'Not well-formed XML' }[r.status];
+    var h = '<div class="card"><div class="verdict v-' + r.status + '">' + label + '</div>';
+    var bits = [];
+    if (r.kind) bits.push((r.kind === 'urlset' ? 'Sitemap' : 'Sitemap index') + ' with ' + r.count + (r.kind === 'urlset' ? ' URL' : ' sitemap') + (r.count === 1 ? '' : 's'));
+    bits.push(r.bytes + ' bytes');
+    h += '<div class="stats">' + bits.join(' - ') + '</div>';
+    if (r.status === 'malformed') h += '<div class="stats">XML errors stop the check: fix this first, the schema is checked after.</div>';
+    if (r.status === 'valid' && !r.issues.length) h += '<div class="n good">No problems found.</div>';
+    r.issues.forEach(function (x) { h += '<div class="n ' + x.lvl + '"><span class="ln">' + (x.line ? 'line ' + x.line : '') + '</span>' + (x.tag ? '<code>' + esc(x.tag) + '</code> ' : '') + esc(x.msg) + '</div>'; });
+    $('out').innerHTML = h + '</div>';
+  }
+  $('pre').innerHTML = PRESETS.map(function (p, i) { return '<button data-i="' + i + '">' + p.n + '</button>'; }).join('');
+  $('pre').onclick = function (e) { var i = e.target.getAttribute && e.target.getAttribute('data-i'); if (i === null || i === undefined) return; var p = PRESETS[+i]; $('xml').value = p.xml; $('loc').value = p.loc; run(); };
+  $('xml').addEventListener('input', run); $('loc').addEventListener('input', run);
+  $('pre').firstChild.click();
+})();
+</script></body></html>
